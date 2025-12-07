@@ -1,0 +1,173 @@
+
+╔════════════════════════════════════════════════════════════════════════╗
+║          EPISODE 2 — FAULT TOLERANCE IN DISTRIBUTED SYSTEMS            ║
+╚════════════════════════════════════════════════════════════════════════╝
+
+
+┌─────────────────────────────────────────────────────────────┐
+│                 DISTRIBUTED SYSTEM REALITY                  │
+├─────────────────────────────────────────────────────────────┤
+│                                                             │
+│     Client         Client         Client                    │
+│        │              │              │                      │
+│        ▼              ▼              ▼                      │
+│   ┌──────────┐   ┌──────────┐   ┌──────────┐                │
+│   │  Load    │   │  Load    │   │  Load    │                │
+│   │ Balancer │   │ Balancer │   │ Balancer │                │
+│   └──────────┘   └──────────┘   └──────────┘                │
+│        │              │              │                      │
+│        └──────────────┼──────────────┘                      │
+│                       ▼                                     │
+│              ┌──────────────────┐                           │
+│              │ Service Mesh /   │                           │
+│              │ Message Router   │                           │
+│              └─────────┬────────┘                           │
+│                        │                                    │
+│        ┌───────────────┼───────────────┐                    │
+│        ▼               ▼               ▼                    │
+│   ┌─────────┐     ┌─────────┐     ┌─────────┐               │
+│   │  Node   │◄───►│  Node   │◄───►│  Node   │               │
+│   │   A     │     │   B     │     │   C     │               │
+│   └─────────┘     └─────────┘     └─────────┘               │
+│        │               │               │                    │
+│        ▼               ▼               ▼                    │
+│   ┌─────────┐     ┌─────────┐     ┌─────────┐               │
+│   │Storage  │     │Storage  │     │Storage  │               │
+│   │Replica 1│     │Replica 2│     │Replica 3│               │
+│   └─────────┘     └─────────┘     └─────────┘               │
+│                                                             │
+└─────────────────────────────────────────────────────────────┘
+
+
+1️⃣  TYPES OF FAILURES
+─────────────────────────
+
+    +---------------------+       +----------------------+
+    | Crash Failure       |       | Byzantine Failure    |
+    | (Fail-Stop)         |       | (Arbitrary behavior) |
+    +---------------------+       +----------------------+
+            |                             |
+            ▼                             ▼
+     Node stops responding         Node sends inconsistent data
+     → easy to detect              → may lie to others
+                                    → hard to detect
+
+🟢 **Fail-Stop Model**
+   - Node fails silently — no more heartbeats.
+   - Other nodes quickly detect absence.
+   - Easy to replace or restart node.
+   - Used in most modern systems like Kafka brokers, ZooKeeper, Kubernetes pods.
+
+🔴 **Byzantine Model**
+   - Node behaves erratically — sends conflicting data.
+   - Harder to detect, requires voting or consensus.
+   - Seen in blockchain, avionics, and safety-critical systems.
+   - Example: a sensor reporting different values to different controllers.
+
+2️⃣  FAULT TOLERANCE MECHANISMS
+───────────────────────────────
+
+1️⃣ **Replication**
+
+    +---------+ → +---------+ → +---------+
+    | Node 1  |   | Node 2  |   | Node 3  |
+    +---------+   +---------+   +---------+
+
+   - Multiple replicas of data or service.
+   - Survive node or disk failure.
+   - Achieved using **leader-follower** (Kafka, MongoDB) or **multi-leader** (Cassandra).
+   - Core tradeoff: **Consistency vs Availability (CAP Theorem)**.
+
+   ⚙️ *Example:*
+   In Kafka, each partition has one leader and several followers.
+   If leader dies, ISR (in-sync replica) list picks a new leader automatically.
+
+
+2️⃣ **Retries & Heartbeats**
+
+    Node A ──heartbeat──▶ Node B
+    Node B stops → Node A marks it “FAILED”
+
+   - Heartbeats: periodic pings to check aliveness.
+   - Retries: resending failed requests (with exponential backoff).
+   - Prevents temporary glitches from becoming hard failures.
+
+   ⚙️ *Example:*
+   Kubernetes uses health probes (`livenessProbe`, `readinessProbe`)
+   to restart containers that stop responding.
+
+
+3️⃣ **Checkpointing & Recovery**
+
+    Event → Save State → Crash → Reload State
+
+   - Save intermediate state to disk or object store.
+   - On crash, reload from last checkpoint.
+   - Reduces recovery time and avoids recomputation.
+   - Common in stream processors like Apache Flink and Spark Streaming.
+
+   ⚙️ *Analogy:*
+   Like saving a video game — if you crash, you restart from last save point.
+
+
+4️⃣ **Write-Ahead Logging (WAL)**
+
+    +-------------------+
+    | Write-Ahead Log   |
+    +-------------------+
+    | Log operation     |
+    | Apply change      |
+    | Save checkpoint   |
+    +-------------------+
+
+   ✅ Guarantees durability and atomicity.
+   ✅ Even if crash occurs mid-update, data can be recovered.
+
+   **Process:**
+   1. Write the intent to the log (append-only file).
+   2. Apply change in memory.
+   3. Periodically save checkpoints.
+   4. On restart → replay all operations after last checkpoint.
+
+   ⚙️ *Example:*
+   PostgreSQL, HDFS NameNode, and Raft all use WAL to recover cleanly.
+
+
+5️⃣ **Replication for Fault Tolerance**
+
+    +---------+     +---------+     +---------+
+    | Leader  | --> | Follower| --> | Follower|
+    +---------+     +---------+     +---------+
+
+   - Leader handles writes, followers replicate state.
+   - On crash → new leader is elected.
+   - Followers serve reads (depending on config).
+
+   ⚖️ **Tradeoffs**
+   - Synchronous replication → strong consistency but slower writes.
+   - Asynchronous replication → high performance but eventual consistency.
+
+   ⚙️ *Example:*
+   In MongoDB, the Primary replicates to Secondaries.
+   If the Primary fails, a new Primary is auto-elected by a majority vote.
+
+7️⃣  REAL-WORLD CASE STUDIES
+───────────────────────────────
+   ⚙️ **Kafka:**
+      - Uses leader-follower replication.
+      - Ensures durability via write-ahead log (WAL).
+      - Detects broker crashes using ZooKeeper or KRaft.
+
+   ⚙️ **HDFS (Hadoop Distributed File System):**
+      - NameNode checkpoint + journal (WAL).
+      - DataNode replication (usually 3 copies).
+      - Failover to standby NameNode.
+
+   ⚙️ **Kubernetes:**
+      - Control plane runs replicated API servers.
+      - etcd database uses Raft for consensus.
+      - Auto-healing: restarts failed containers.
+
+   ⚙️ **Cassandra:**
+      - Multi-leader replication (AP system).
+      - Tunable consistency via quorum reads/writes.

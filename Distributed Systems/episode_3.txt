@@ -1,0 +1,145 @@
+/*
+╔════════════════════════════════════════════════════════════════════════╗
+║        EPISODE 3 — TIME & EVENT ORDERING IN DISTRIBUTED SYSTEMS        ║
+╚════════════════════════════════════════════════════════════════════════╝
+
+Distributed systems run on multiple nodes with independent clocks.
+Without a global clock, ordering events consistently is hard but critical.
+
+
+1. Why Ordering Matters - Real World Examples
+
+Example 1: Chat Application
+
+Timeline WITHOUT proper ordering:
+┌─────────────────────────────────────────────────────┐
+│ User A: "Meeting at 3 PM?"                          │
+│                                                     │
+│ User B: "No, meeting cancelled"   (sent at 2:55 PM) │
+│                                                     │
+│ User B: "Yes, let's meet"        (sent at 2:50 PM)  │
+│                                                     │
+│ ❌ FINAL VIEW: "Yes, let's meet" → CONFUSION!        │
+└─────────────────────────────────────────────────────┘
+
+With proper ordering (causal):
+"Meeting at 3 PM?" → "Yes, let's meet" → "No, cancelled"
+
+Example 2: Collaborative Editing
+
+Two users editing same document:
+┌─────────────────────────────────────────────────────┐
+│ User 1 types: "Hello World"                         │
+│                                                     │
+│ User 2 types: "Hello Awesome World"                 │
+│ (inserts "Awesome" between "Hello" and "World")     │
+│                                                     │
+│ ❌ Without ordering: Could become                   │
+│    "Hello World Awesome" → Makes no sense!          │
+└─────────────────────────────────────────────────────┘
+
+2) CLOCK SKEW & TIME IN DISTRIBUTED SYSTEMS
+
+Node clocks are not perfectly synchronized:
+- **Clock skew:** difference between node clocks.
+- **Clock drift:** gradual divergence over time.
+- **Network latency:** messages take time to arrive → timestamps are unreliable.
+
+⚠️ Problem: If we use physical clocks to order events, inconsistent ordering may occur.
+
+3) The Solution - Logical Clocks
+
+Lamport Clocks (1978, Leslie Lamport)
+Key Insight: "Don't use actual time, count events!"
+
+Lamport Rules:
+
+Each process maintains a counter (initially 0)
+
+On local event: counter += 1
+
+On send message: counter += 1, send counter with message
+
+On receive message: counter = max(local_counter, received_counter) + 1
+
+Visual Representation:
+
+Process P1           Process P2           Process P3
+    1                    1                    1
+    │ (local event)      │                    │
+    2                    │                    │
+    │                    │                    │
+    3 ──m1[L=3]───────►  │                    │
+    │                    │                    │
+    4                    │  4 ← m1 arrives    │
+    │                    │  (max(1,3)+1=4)    │
+    │                    │  5 (local event)   │
+    │                    │  6 ──m2[L=6]─────► │
+    │                    │                    │
+    5                    │                    │  7 ← m2 arrives
+    │                    │                    │  (max(1,6)+1=7)
+    6                    │                    │  8 (local event)
+
+Lamport Properties:
+
+✅ Guarantees: If event A → B (happens-before), then LC(A) < LC(B)
+❌ Limitation: Cannot detect concurrent events (two independent events may have same LC ordering)
+
+**Illustration:**
+Node A            Node B
+  LC=1               LC=1
+   | Event a         |
+   |---------------->| Send a with LC=2
+                     | LC := max(1,2)+1=3 Event b
+  LC=2 Event a done  |
+
+4) VECTOR CLOCKS
+   ─────────────────────────────────────────────────────────────
+
+   💡 Idea: Each node maintains a vector of counters, one per node.
+
+   - VectorClock[i] = number of events known at Node i
+   - On local event: increment own entry
+   - On message: send vector, merge using max per entry
+
+   **Example:**
+   Node A: [2,0,1]  Node B: [1,3,0]
+
+   - After sending/receiving:
+     Node A merges → [2,3,1]
+     Node B merges → [2,3,1]
+
+   ✅ Advantages:
+   - Detects **concurrent events**
+   - Can reconstruct partial ordering
+   - Crucial for CRDTs, distributed versioning
+
+
+Example: 3 Processes
+
+Initial:        P1:[0,0,0]  P2:[0,0,0]  P3:[0,0,0]
+
+P1 local event: P1:[1,0,0]
+P1 sends to P2: P1:[2,0,0] → m1
+
+P2 receives m1: P2:[2,0,0] → P2 local: [2,1,0]
+P2 sends to P3: P2:[2,2,0] → m2
+
+P3 local event: P3:[0,0,1]
+P3 receives m2: P3:[max(0,2),max(0,2),max(1,0)+1]
+               = [2,2,2]
+
+Now we can detect concurrency!
+
+   ─────────────────────────────────────────────────────────────
+   6️⃣ KEY TAKEAWAYS
+   ─────────────────────────────────────────────────────────────
+
+   - Physical clocks alone are unreliable in distributed systems.
+   - **Lamport clocks:** simple, maintains “happens-before” order.
+   - **Vector clocks:** detect concurrency, stronger ordering info.
+   - Ordering is essential for correctness (banking, chat, logs).
+   - Real-world systems: DynamoDB, Cassandra, Riak, and CRDT-based systems
+   rely on vector clocks for conflict resolution.
+
+   */
